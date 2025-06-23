@@ -51,8 +51,3 @@ B567:Routeur-Lyon:192.168.1.2:Juniper
 - Automatisation complète de la création de sessions SSH
 - Structure hiérarchique claire (catégories → clients → sessions)
 - Facilement réutilisable et modifiable
-
-## Auteur
-
-**enguerra-n**  
-Créé le 23/06/25
