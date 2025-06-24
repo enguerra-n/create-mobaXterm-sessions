@@ -1,11 +1,12 @@
 # Script PowerShell pour générer un fichier .mxtsessions importable sur MobaXterm
 ###
 ###     Version: 1.2
-###     Auteur: enguerra-n
+###     Auteur: enguerra-n (adapté)
 ###     Créé le: 23/06/25
-###     Modifié le: 24/06/25 - Ajout détection et saisie username
+###     Modifié: 24/06/25 - Mode sans username / avec username via -u
 ###
 param(
+    [switch]$u,
     [switch]$h,
     [switch]$help
 )
@@ -17,10 +18,10 @@ function Show-Help {
     Write-Host "Ce script génère un fichier .mxtsessions importable dans MobaXterm"
     Write-Host "à partir d'un fichier router.db créé par Oxidized."
     Write-Host ""
-    Write-Host "Toute marque détectée demandera un nom d'utilisateur."
-    Write-Host ""
-    Write-Host "Utilisation : .\script.ps1              Exécute le script."
-    Write-Host "               .\script.ps1 -h           Affiche cette aide."
+    Write-Host "Utilisation :"
+    Write-Host "    .\script.ps1          → Génère les sessions avec un username par défaut ('admin')"
+    Write-Host "    .\script.ps1 -u       → Demande les usernames pour chaque marque"
+    Write-Host "    .\script.ps1 -h       → Affiche cette aide"
     Write-Host ""
     exit 0
 }
@@ -51,18 +52,25 @@ Get-Content -Path "router.db" | ForEach-Object {
     }
 }
 
-# Saisie des usernames
+# Gestion des usernames
 $brand_username_map = @{}
-Write-Host ""
-Write-Host "=== CONFIGURATION DES USERNAMES PAR MARQUE ===" -ForegroundColor Cyan
-foreach ($brand in $detected_brands | Sort-Object) {
-    do {
-        $username_input = Read-Host "Entrez le nom d'utilisateur pour la marque '$brand'"
-    } while ([string]::IsNullOrWhiteSpace($username_input))
-    $brand_username_map[$brand] = $username_input
+if ($u) {
+    Write-Host ""
+    Write-Host "=== CONFIGURATION DES USERNAMES PAR MARQUE ===" -ForegroundColor Cyan
+    foreach ($brand in $detected_brands | Sort-Object) {
+        do {
+            $username_input = Read-Host "Entrez le nom d'utilisateur pour la marque '$brand'"
+        } while ([string]::IsNullOrWhiteSpace($username_input))
+        $brand_username_map[$brand] = $username_input
+    }
+    Write-Host ""
+} else {
+    foreach ($brand in $detected_brands) {
+        $brand_username_map[$brand] = "admin"
+    }
 }
-Write-Host ""
 
+# Saisie du nom du dossier global
 $folder_global_name = Read-Host "Entrez le nom du dossier global qui contiendra toutes les sessions"
 if ([string]::IsNullOrWhiteSpace($folder_global_name)) {
     Write-Host "Erreur: Le nom du dossier ne peut pas être vide" -ForegroundColor Red
@@ -72,7 +80,7 @@ if ([string]::IsNullOrWhiteSpace($folder_global_name)) {
 Write-Host ""
 Write-Host "Traitement en cours..." -ForegroundColor Yellow
 
-# Traitement des données
+# Initialisation
 $categories_data = @{}
 $clients_data = @{}
 $router_data = Get-Content -Path "router.db"
@@ -171,7 +179,7 @@ $all_bookmarks = $all_bookmarks | Sort-Object ID
 $current_id = 1
 foreach ($bm in $all_bookmarks) { $bm.ID = $current_id; $current_id++ }
 
-# Génération fichier .mxtsessions
+# Génération du fichier sessions
 Write-Host "Génération du fichier MobaXterm..." -ForegroundColor Yellow
 $fileContent = @(
     "[Bookmarks]",
