@@ -1,44 +1,95 @@
-# Script PowerShell pour generer un fichier .mxtsessions importable sur MobaXterm
-
+# Script PowerShell pour générer un fichier .mxtsessions importable sur MobaXterm
 ###
-###     Version: 1.0
+###     Version: 1.2
 ###     Auteur: enguerra-n
-###     Cree le: 23/06/25
+###     Créé le: 23/06/25
+###     Modifié le: 24/06/25 - Ajout détection et saisie username
 ###
-###########################################
-# Explication du script
-###########################################
-# Ce script permet d'importer de créer des sessions moba avec un fichier router.db créer par un serveur oxidized
-# de la forme suivante : 
-# CODE_EQUIPEMENT:REFERENCE_EQUIPEMENT:ADDR_IP:MARQUE_EQUIPEMENT
-#
-# Utilisation : 
-# 1. Exécutez ce script avec le fichier router.db dans le même dossier.
-# 2. Entrez le nom du dossier globale qui contiendra les sessions à créer
-# 3. Le fichier sessions_import.mxtsessions sera créer.
-#
-# Ce script à était créer avec l'aide de claude.ai (définition des foncitons) et chatgpt (mise en forme).
+param(
+    [switch]$h,
+    [switch]$help
+)
 
+function Show-Help {
+    Write-Host ""
+    Write-Host "=== GENERATEUR DE SESSIONS MOBAXTERM ==="
+    Write-Host ""
+    Write-Host "Ce script génère un fichier .mxtsessions importable dans MobaXterm"
+    Write-Host "à partir d'un fichier router.db créé par Oxidized."
+    Write-Host ""
+    Write-Host "Toute marque détectée demandera un nom d'utilisateur."
+    Write-Host ""
+    Write-Host "Utilisation : .\script.ps1              Exécute le script."
+    Write-Host "               .\script.ps1 -h           Affiche cette aide."
+    Write-Host ""
+    exit 0
+}
 
-# Verifie si le fichier router.db existe
+if ($h -or $help) {
+    Show-Help
+}
+
+Write-Host ""
+Write-Host "=== GENERATEUR DE SESSIONS MOBAXTERM ===" -ForegroundColor Cyan
+
 if (-not (Test-Path -Path "router.db")) {
     Write-Host "Erreur: Le fichier router.db n'existe pas" -ForegroundColor Red
     exit 1
 }
-$folder_global_name = Read-Host "Entrez le nom du dossier à créer"
-$CONFIG_FILE = "sessions_import.mxtsessions"
 
+Write-Host "Fichier router.db trouvé !" -ForegroundColor Green
+
+# Détection des marques
+$detected_brands = @()
+Get-Content -Path "router.db" | ForEach-Object {
+    $parts = $_.Split(":")
+    if ($parts.Length -ge 4) {
+        $brand = $parts[3].Trim().ToUpper()
+        if ($brand -and -not $detected_brands.Contains($brand)) {
+            $detected_brands += $brand
+        }
+    }
+}
+
+# Saisie des usernames
+$brand_username_map = @{}
+Write-Host ""
+Write-Host "=== CONFIGURATION DES USERNAMES PAR MARQUE ===" -ForegroundColor Cyan
+foreach ($brand in $detected_brands | Sort-Object) {
+    do {
+        $username_input = Read-Host "Entrez le nom d'utilisateur pour la marque '$brand'"
+    } while ([string]::IsNullOrWhiteSpace($username_input))
+    $brand_username_map[$brand] = $username_input
+}
+Write-Host ""
+
+$folder_global_name = Read-Host "Entrez le nom du dossier global qui contiendra toutes les sessions"
+if ([string]::IsNullOrWhiteSpace($folder_global_name)) {
+    Write-Host "Erreur: Le nom du dossier ne peut pas être vide" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host ""
+Write-Host "Traitement en cours..." -ForegroundColor Yellow
+
+# Traitement des données
 $categories_data = @{}
 $clients_data = @{}
-
 $router_data = Get-Content -Path "router.db"
+$total_lines = $router_data.Count
+$processed_lines = 0
+
 foreach ($line in $router_data) {
+    $processed_lines++
+    Write-Progress -Activity "Lecture du fichier router.db" -Status "Ligne $processed_lines sur $total_lines" -PercentComplete (($processed_lines / $total_lines) * 100)
+
     $parts = $line.Split(":")
     if ($parts.Length -ge 4) {
         $code_client = $parts[0].Trim()
         $reference_routeur = $parts[1].Trim()
         $ip = $parts[2].Trim()
         $marque = $parts[3].Trim()
+        $marque_up = $marque.ToUpper()
 
         if ($code_client.Length -ge 4 -and $code_client.Substring(1,3) -match '^\d{3}$') {
             $categorie_nom = $code_client.Substring(0, 4)
@@ -49,17 +100,10 @@ foreach ($line in $router_data) {
         }
 
         if (-not $categories_data.ContainsKey($categorie_nom)) {
-            $categories_data[$categorie_nom] = @{
-                SubRep = $categorie_nom
-            }
+            $categories_data[$categorie_nom] = @{ SubRep = $categorie_nom }
         }
 
-        $client_folder_name = if ($marque -and $marque -ne $code_client -and $marque.Trim() -ne "") {
-            "$code_client"
-        } else {
-            $code_client
-        }
-
+        $client_folder_name = $code_client
         $client_key = "$categorie_nom\$client_folder_name"
 
         if (-not $clients_data.ContainsKey($client_key)) {
@@ -71,140 +115,119 @@ foreach ($line in $router_data) {
         }
 
         $session_name = "$reference_routeur -- $marque"
-        $session_value = "#109#0%${ip}%22%%%-1%-1%%%22%%0%-1%0%%%-1%0%0%0%%1080%%0%0%1#MobaFont%10%0%0%0%15%236,236,236%30,30,30%180,180,192%0%-1%0%%xterm%-1%-1%_Std_Colors_0_%80%24%0%1%-1%<none>%%0#0# #-1"
+        $session_username = if ($brand_username_map.ContainsKey($marque_up)) {
+            $brand_username_map[$marque_up]
+        } else {
+            "admin"
+        }
 
+        $session_value = "#109#0%${ip}%22%${session_username}%%-1%-1%%%%%0%0%0%%%-1%0%0%0%%1080%%0%0%1#MobaFont%10%0%0%0%15%236,236,236%30,30,30%180,180,192%0%-1%0%%xterm%-1%-1%_Std_Colors_0_%80%24%0%1%-1%<none>%%0#0# #-1"
         $clients_data[$client_key].Sessions += "$session_name=$session_value"
     }
 }
+Write-Progress -Activity "Lecture du fichier router.db" -Completed
 
+# Organisation des bookmarks
 $BOOKMARK_ID = 1
 $categories_info = @{}
-$clients_info = @{}
-
-foreach ($cat_name in $categories_data.Keys | Sort-Object) {
-    $categories_info[$cat_name] = @{
-        ID = $BOOKMARK_ID
-        SubRep = $categories_data[$cat_name].SubRep
-    }
+foreach ($cat in $categories_data.Keys | Sort-Object) {
+    $categories_info[$cat] = @{ ID = $BOOKMARK_ID; SubRep = $categories_data[$cat].SubRep }
     $BOOKMARK_ID++
 }
 
-# Ne garder que les clients qui ont au moins une session
+$clients_info = @{}
 foreach ($client_key in $clients_data.Keys | Sort-Object) {
-    $client_data = $clients_data[$client_key]
-    if ($client_data.Sessions.Count -gt 0) {
-        $parent_category_id = $categories_info[$client_data.ParentCategory].ID
-
+    $cd = $clients_data[$client_key]
+    if ($cd.Sessions.Count -gt 0) {
+        $parent_id = $categories_info[$cd.ParentCategory].ID
         $clients_info[$client_key] = @{
             ID = $BOOKMARK_ID
-            ParentID = $parent_category_id
-            Name = $client_data.Name
-            Sessions = $client_data.Sessions
+            ParentID = $parent_id
+            Name = $cd.Name
+            Sessions = $cd.Sessions
         }
         $BOOKMARK_ID++
     }
 }
 
-# Supprimer les catégories qui ne contiennent aucun client
 $used_categories = $clients_info.Values | ForEach-Object { $_.ParentID } | Select-Object -Unique
-$categories_info = $categories_info.GetEnumerator() | Where-Object {
-    $used_categories -contains $_.Value.ID
-} | ForEach-Object {
-    [PSCustomObject]@{
-        Key = $_.Key
-        Value = $_.Value
-    }
-} 
+$categories_info = $categories_info.GetEnumerator() |
+    Where-Object { $used_categories -contains $_.Value.ID } |
+    ForEach-Object { @{ Key = $_.Key; Value = $_.Value } }
 
 $all_bookmarks = @()
-
-foreach ($cat_name in $categories_info.Keys | Sort-Object) {
-    $cat_data = $categories_info[$cat_name].Value
-    $all_bookmarks += @{
-        Type = "Category"
-        ID = $cat_data.ID
-        Name = $cat_name
-        SubRep = $cat_data.SubRep
-        Sessions = @()
-    }
+foreach ($cat in $categories_info.Keys | Sort-Object) {
+    $v = $categories_info[$cat]
+    $all_bookmarks += @{ Type="Category"; ID=$v.ID; Name=$cat; SubRep=$v.SubRep; Sessions=@() }
 }
-
 foreach ($client_key in $clients_info.Keys | Sort-Object) {
-    $client_data = $clients_info[$client_key]
-    $parent_category_name = ($categories_info.GetEnumerator() | Where-Object { $_.Value.ID -eq $client_data.ParentID }).Key
-    $client_subrep_path = "$($client_data.Name)"
-
-    $all_bookmarks += @{
-        Type = "Client"
-        ID = $client_data.ID
-        Name = $client_data.Name
-        SubRep = "$folder_global_name\$client_subrep_path"
-        Sessions = $client_data.Sessions
-    }
+    $ci = $clients_info[$client_key]
+    $subrep = "$folder_global_name\$($ci.Name)"
+    $all_bookmarks += @{ Type="Client"; ID=$ci.ID; Name=$ci.Name; SubRep=$subrep; Sessions=$ci.Sessions }
 }
 
-# Réassignation des ID pour éviter les trous
+# Réassignation contiguë des IDs
 $all_bookmarks = $all_bookmarks | Sort-Object ID
 $current_id = 1
-foreach ($bookmark in $all_bookmarks) {
-    $bookmark.ID = $current_id
-    $current_id++
-}
+foreach ($bm in $all_bookmarks) { $bm.ID = $current_id; $current_id++ }
 
-# Génération du fichier final
-$fileContent = @()
-$fileContent += "[Bookmarks]"
-$fileContent += "SubRep="
-$fileContent += "ImgNum=42"
-
-foreach ($bookmark in $all_bookmarks) {
-    $bookmark_id = $bookmark.ID
-    $bookmark_subrep = $bookmark.SubRep
-
+# Génération fichier .mxtsessions
+Write-Host "Génération du fichier MobaXterm..." -ForegroundColor Yellow
+$fileContent = @(
+    "[Bookmarks]",
+    "SubRep=",
+    "ImgNum=42"
+)
+foreach ($bm in $all_bookmarks) {
     $fileContent += ""
-    $fileContent += "[Bookmarks_$bookmark_id]"
-    $fileContent += "SubRep=$bookmark_subrep"
+    $fileContent += "[Bookmarks_$($bm.ID)]"
+    $fileContent += "SubRep=$($bm.SubRep)"
     $fileContent += "ImgNum=41"
-
-    if ($bookmark.Type -eq "Client" -and $bookmark.Sessions.Count -gt 0) {
-        foreach ($session_entry in $bookmark.Sessions) {
-            $fileContent += $session_entry
-        }
+    if ($bm.Type -eq "Client") {
+        $fileContent += $bm.Sessions
     }
 }
-
-$utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $false
-[System.IO.File]::WriteAllLines((Get-Location).Path + "\$CONFIG_FILE", $fileContent, $utf8NoBomEncoding)
+$filePath = Join-Path -Path (Get-Location) -ChildPath "sessions_import.mxtsessions"
+[System.IO.File]::WriteAllLines($filePath, $fileContent, (New-Object System.Text.UTF8Encoding $false))
 
 # Fichier de debug
-$debug_file = "debug_structure.txt"
-$debug_content = @()
-$debug_content += "=== STRUCTURE GENEREE DANS L'ORDRE ==="
-$debug_content += ""
-
-foreach ($bookmark in $all_bookmarks) {
-    $debug_content += "[$($bookmark.ID)] Type: $($bookmark.Type)"
-    $debug_content += "    Nom: $($bookmark.Name)"
-    $debug_content += "    SubRep: $($bookmark.SubRep)"
-    if ($bookmark.Type -eq "Client") {
-        $debug_content += "    Sessions: $($bookmark.Sessions.Count)"
-        foreach ($session in $bookmark.Sessions) {
-            $session_name = $session.Split('=')[0]
-            $debug_content += "      - $session_name"
+$debug = @()
+$debug += "=== STRUCTURE GENERÉE ==="
+$debug += "Dossier global: $folder_global_name"
+$debug += "Date de génération: $(Get-Date)"
+$debug += ""
+$debug += "=== USERNAMES PAR MARQUE ==="
+foreach ($b in $brand_username_map.Keys | Sort-Object) {
+    $debug += "$b -> $($brand_username_map[$b])"
+}
+$debug += ""
+foreach ($bm in $all_bookmarks) {
+    $debug += "[$($bm.ID)] $($bm.Type) : $($bm.Name)"
+    $debug += "    SubRep: $($bm.SubRep)"
+    if ($bm.Type -eq "Client") {
+        $debug += "    Sessions: $($bm.Sessions.Count)"
+        foreach ($s in $bm.Sessions) {
+            $debug += "      - " + ($s.Split('=')[0])
         }
     }
-    $debug_content += ""
+    $debug += ""
 }
+[System.IO.File]::WriteAllLines("debug_structure.txt", $debug, (New-Object System.Text.UTF8Encoding $false))
 
-[System.IO.File]::WriteAllLines((Get-Location).Path + "\$debug_file", $debug_content, $utf8NoBomEncoding)
-
-Write-Host "Fichier MobaXterm genere: $CONFIG_FILE" -ForegroundColor Green
+# Résumé final
 Write-Host ""
-Write-Host "Importez-le via : clic droit sur User sessions > Import sessions from file"
+Write-Host "=== GÉNÉRATION TERMINÉE AVEC SUCCÈS ===" -ForegroundColor Green
 Write-Host ""
-
-Write-Host "Statistiques:" -ForegroundColor Magenta
-Write-Host "• Total bookmarks: $(($all_bookmarks | Measure-Object).Count)"
-Write-Host "• Categories: $(($all_bookmarks | Where-Object { $_.Type -eq 'Category' } | Measure-Object).Count)"
-Write-Host "• Clients: $(($all_bookmarks | Where-Object { $_.Type -eq 'Client' } | Measure-Object).Count)"
-Write-Host "• Total sessions: $(($all_bookmarks | Where-Object { $_.Type -eq 'Client' } | ForEach-Object { $_.Sessions.Count } | Measure-Object -Sum).Sum)"
+Write-Host "Fichiers générés :" -ForegroundColor Cyan
+Write-Host "• sessions_import.mxtsessions" -ForegroundColor White
+Write-Host "• debug_structure.txt" -ForegroundColor White
+Write-Host ""
+Write-Host "Importez dans MobaXterm via : clic droit sur 'User sessions' > 'Import sessions from file'." -ForegroundColor Yellow
+Write-Host ""
+Write-Host "STATISTIQUES :" -ForegroundColor Magenta
+Write-Host ("• Bookmarks : " + ($all_bookmarks.Count))
+Write-Host ("• Catégories : " + ($all_bookmarks | Where-Object { $_.Type -eq "Category" } | Measure-Object).Count)
+Write-Host ("• Clients : " + ($all_bookmarks | Where-Object { $_.Type -eq "Client" } | Measure-Object).Count)
+Write-Host ("• Sessions totales : " + ($all_bookmarks | Where-Object { $_.Type -eq "Client" } |
+    ForEach-Object { $_.Sessions.Count } | Measure-Object -Sum).Sum)
+Write-Host ""
